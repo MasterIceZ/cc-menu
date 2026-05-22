@@ -99,7 +99,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        setDisplay("✦ S:--% W:--%")
+        setDisplay("✺ S:--% W:--%")
 
         cachedCreds = readKeychainCredentials()
 
@@ -124,7 +124,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let usage = try await fetchUsage(creds: creds)
-            let text = "✦ S:\(usage.sessionPercent)% W:\(usage.weeklyPercent)%"
+            let text = "✺ S:\(usage.sessionPercent)% W:\(usage.weeklyPercent)%"
             lastDisplay = text
             setDisplay(text)
         } catch ClaudeError.unauthorized {
@@ -137,10 +137,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                || urlErr.code == .cannotConnectToHost
                || urlErr.code == .timedOut
         {
-            setDisplay("⚠ ✦ S:--% W:--%")
+            setDisplay("⚠ S:--% W:--%")
         } catch {
             fputs("cc-menu: \(error)\n", stderr)
-            setDisplay(lastDisplay ?? "✦ S:--% W:--%")
+            setDisplay(lastDisplay ?? "✺ S:--% W:--%")
         }
     }
 
