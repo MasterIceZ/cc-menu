@@ -7,88 +7,86 @@ A minimal macOS menu bar app that shows Claude AI quota usage as plain text.
 Display two values in the macOS menu bar, updated every 60 seconds:
 
 ```
-S:42% W:71%
+✽ 42% 71%
 ```
 
-- **S** = current 5-hour session usage (%)
-- **W** = weekly usage (%)
-
-Nothing else. No popover, no window, no settings UI.
+- First % = current 5-hour session usage
+- Second % = 7-day weekly usage
 
 ## Constraints
 
 - Swift Package only — no `.xcodeproj`, no storyboards, no NIB files
 - Target: macOS 13+
 - No third-party dependencies — only Foundation, AppKit, Security frameworks
-- Single executable target in `Package.swift`
+- Single executable target in `Package.swift` named `cc-menu`
+- Swift language mode: v5
 
 ## Architecture
 
-Single file is fine. The app needs:
+Single file: `Sources/cc-menu/cc_menu.swift`
 
-1. **NSStatusItem** — shows the text in the menu bar
+1. **NSStatusItem** — shows text in the menu bar
 2. **Keychain reader** — reads Claude Code's stored OAuth access token
-3. **API poller** — calls the Anthropic usage endpoint with that token
+3. **API poller** — calls the Anthropic OAuth usage endpoint
 4. **Timer** — refreshes every 60 seconds
+5. **NSMenu** — shown on click with reset times, New Chat link, and Quit
 
 ## Keychain
 
-Claude Code stores OAuth credentials in the macOS Keychain. Read the access token like this:
-
-- Service name: `"Claude Code"`
-- Account: any (enumerate all matches, pick the first valid one)
-- Use `SecItemCopyMatching` with `kSecClassGenericPassword`
-
-The token is a JWT. Use it as a Bearer token in API requests.
-
-If the token is expired, attempt a refresh using the stored refresh token before giving up. The refresh endpoint is `https://claude.ai/api/auth/oauth/refresh` with `{"refresh_token": "<token>"}`.
+- Service name: `"Claude Code-credentials"`
+- Use `SecItemCopyMatching` with `kSecClassGenericPassword` and `kSecMatchLimitOne`
+- Data is a JSON blob: `{"claudeAiOauth": {"accessToken": "...", "refreshToken": "..."}}`
+- Credentials are read once at launch and cached in memory to avoid repeated keychain prompts
 
 ## API
 
-Endpoint used by claude-monitor (reverse engineered, not official):
-
 ```
-GET https://claude.ai/api/organizations/<org_id>/usage
+GET https://api.anthropic.com/api/oauth/usage
 Authorization: Bearer <access_token>
+anthropic-beta: oauth-2025-04-20
 ```
 
-To get org_id, first call:
-
-```
-GET https://claude.ai/api/auth/session
-Authorization: Bearer <access_token>
-```
-
-Parse `memberships[0].organization.id` from the response.
-
-The usage response contains:
-
+Response structure:
 ```json
 {
-  "primary_usage_percent": 42.0,
-  "primary_reset_at": "...",
-  "weekly_usage_percent": 71.0,
-  "weekly_reset_at": "..."
+  "five_hour":  { "utilization": 20.0, "resets_at": "2026-05-22T10:50:00Z" },
+  "seven_day":  { "utilization": 5.0,  "resets_at": "2026-05-24T03:00:00Z" }
 }
 ```
 
-Use `primary_usage_percent` for S and `weekly_usage_percent` for W.
+On 401/403, attempt a token refresh via:
+```
+POST https://claude.ai/api/auth/oauth/refresh
+{"refresh_token": "<token>"}
+```
 
 ## Menu bar text format
 
 ```
-S:42% W:71%
+✽ 20% 5%
 ```
 
 - Round to nearest integer
-- If data is unavailable or loading: show `S:--% W:–-%`
-- If token is missing: show `Claude: no auth`
+- No internet: `⚠ --% --%`
+- Token missing/expired: `Claude: no auth`
+- Loading/error: `✽ --% --%`
+
+## Menu (on click)
+
+```
+Session resets in 2h 15m
+Weekly resets May 24, 2026 at 10:00 AM
+———————————————————
+New Chat                    ⌘N
+———————————————————
+Quit                        ⌘Q
+```
 
 ## Error handling
 
-- On network error: keep last known values, retry on next tick
-- On 401: attempt token refresh once, then show `Claude: no auth`
-- On any other error: show `S:--% W:–-%`, log to stderr
+- Network error (no internet): show `⚠ --% --%`
+- Other errors: keep last known values, log to stderr
+- 401/403: refresh token once, then show `Claude: no auth`
 
 ## Build & run
 
@@ -97,22 +95,29 @@ swift build
 .build/debug/cc-menu
 ```
 
-## Distribution (Homebrew)
+## Distribution (Homebrew cask)
 
-After the app works, it will be distributed via a personal Homebrew tap.
-The build script should produce a universal binary (arm64 + x86_64):
+Build script produces a universal `.app` bundle:
 
 ```bash
-swift build -c release --arch arm64 --arch x86_64
+bash scripts/build-app.sh 1.0.0
 ```
 
-The binary will be zipped and attached to a GitHub Release, then referenced
-in a Homebrew cask formula in a separate `homebrew-tap` repo.
+This creates `cc-menu.app` (with `LSUIElement=YES` so no dock icon) and zips it to `cc-menu.zip`.
+
+Upload `cc-menu.zip` to a GitHub Release, then reference in `homebrew-tap`:
+- Repo: `MasterIceZ/homebrew-tap`
+- Cask: `Casks/cc-menu.rb`
+
+Install:
+```bash
+brew tap MasterIceZ/tap
+brew install --cask cc-menu
+```
 
 ## What NOT to build
 
 - No preferences window
-- No popover on click
 - No notifications
 - No Sparkle / auto-update framework
-- No LaunchAgent setup (user handles that manually)
+- No LaunchAgent setup (user handles that via Login Items)
