@@ -101,6 +101,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         setDisplay("✺ S:--% W:--%")
 
+        let menu = NSMenu()
+        let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        menu.addItem(quit)
+        statusItem.menu = menu
+
         cachedCreds = readKeychainCredentials()
 
         Task { await poll() }
