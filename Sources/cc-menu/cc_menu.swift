@@ -43,6 +43,19 @@ enum ClaudeError: Error {
 private let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
 private let refreshURL = URL(string: "https://claude.ai/api/auth/oauth/refresh")!
 
+private let isoParser: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+struct UsageData {
+    let sessionPercent: Int
+    let weeklyPercent: Int
+    let sessionResetsAt: Date?
+    let weeklyResetsAt: Date?
+}
+
 func getUsage(token: String) async throws -> UsageData {
     var req = URLRequest(url: usageURL)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -57,18 +70,21 @@ func getUsage(token: String) async throws -> UsageData {
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else { throw ClaudeError.parseFailure }
 
-    let sessionPct = (json["five_hour"] as? [String: Any])?["utilization"] as? Double ?? 0
-    let weeklyPct = (json["seven_day"] as? [String: Any])?["utilization"] as? Double ?? 0
+    let fiveHour = json["five_hour"] as? [String: Any]
+    let sevenDay = json["seven_day"] as? [String: Any]
+
+    let sessionPct = fiveHour?["utilization"] as? Double ?? 0
+    let weeklyPct = sevenDay?["utilization"] as? Double ?? 0
+
+    let sessionResetsAt = (fiveHour?["resets_at"] as? String).flatMap { isoParser.date(from: $0) }
+    let weeklyResetsAt = (sevenDay?["resets_at"] as? String).flatMap { isoParser.date(from: $0) }
 
     return UsageData(
         sessionPercent: Int(sessionPct.rounded()),
-        weeklyPercent: Int(weeklyPct.rounded())
+        weeklyPercent: Int(weeklyPct.rounded()),
+        sessionResetsAt: sessionResetsAt,
+        weeklyResetsAt: weeklyResetsAt
     )
-}
-
-struct UsageData {
-    let sessionPercent: Int
-    let weeklyPercent: Int
 }
 
 func doRefreshToken(_ refreshToken: String) async throws -> String {
@@ -89,6 +105,24 @@ func doRefreshToken(_ refreshToken: String) async throws -> String {
     return newToken
 }
 
+// MARK: - Formatters
+
+private func formatRelative(_ date: Date) -> String {
+    let secs = date.timeIntervalSinceNow
+    guard secs > 0 else { return "now" }
+    let h = Int(secs) / 3600
+    let m = (Int(secs) % 3600) / 60
+    if h > 0 { return "in \(h)h \(m)m" }
+    return "in \(m)m"
+}
+
+private let absoluteFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateStyle = .medium
+    f.timeStyle = .short
+    return f
+}()
+
 // MARK: - App Delegate
 
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -97,13 +131,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var cachedCreds: KeychainCredentials?
     private var lastDisplay: String?
 
+    private var sessionResetItem = NSMenuItem(title: "Session resets: —", action: nil, keyEquivalent: "")
+    private var weeklyResetItem  = NSMenuItem(title: "Weekly resets: —",  action: nil, keyEquivalent: "")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         setDisplay("✺ S:--% W:--%")
 
+        sessionResetItem.isEnabled = false
+        weeklyResetItem.isEnabled  = false
+
         let menu = NSMenu()
-        let quit = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        menu.addItem(quit)
+        menu.addItem(sessionResetItem)
+        menu.addItem(weeklyResetItem)
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
         cachedCreds = readKeychainCredentials()
@@ -121,6 +163,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func updateMenuResets(session: Date?, weekly: Date?) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            if let d = session {
+                self.sessionResetItem.title = "Session resets \(formatRelative(d))"
+            } else {
+                self.sessionResetItem.title = "Session resets: —"
+            }
+            if let d = weekly {
+                self.weeklyResetItem.title = "Weekly resets \(absoluteFormatter.string(from: d))"
+            } else {
+                self.weeklyResetItem.title = "Weekly resets: —"
+            }
+        }
+    }
+
     private func poll() async {
         guard let creds = cachedCreds else {
             setDisplay("Claude: no auth")
@@ -132,6 +190,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let text = "✺ S:\(usage.sessionPercent)% W:\(usage.weeklyPercent)%"
             lastDisplay = text
             setDisplay(text)
+            updateMenuResets(session: usage.sessionResetsAt, weekly: usage.weeklyResetsAt)
         } catch ClaudeError.unauthorized {
             cachedCreds = readKeychainCredentials()
             setDisplay("Claude: no auth")
