@@ -14,39 +14,22 @@ func readKeychainCredentials() -> KeychainCredentials? {
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "Claude Code-credentials",
         kSecReturnData as String: true,
-        kSecMatchLimit as String: kSecMatchLimitAll,
+        kSecMatchLimit as String: kSecMatchLimitOne,
     ]
 
     var result: AnyObject?
     let status = SecItemCopyMatching(query as CFDictionary, &result)
-    guard status == errSecSuccess else { return nil }
+    guard status == errSecSuccess, let data = result as? Data else { return nil }
 
-    let dataItems: [Data]
-    if let array = result as? [Data] {
-        dataItems = array
-    } else if let single = result as? Data {
-        dataItems = [single]
-    } else {
-        return nil
-    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let oauth = json["claudeAiOauth"] as? [String: Any],
+          let accessToken = oauth["accessToken"] as? String
+    else { return nil }
 
-    for data in dataItems {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            continue
-        }
-
-        // Claude Code stores credentials under "claudeAiOauth"
-        if let oauth = json["claudeAiOauth"] as? [String: Any],
-           let accessToken = oauth["accessToken"] as? String
-        {
-            return KeychainCredentials(
-                accessToken: accessToken,
-                refreshToken: oauth["refreshToken"] as? String
-            )
-        }
-    }
-
-    return nil
+    return KeychainCredentials(
+        accessToken: accessToken,
+        refreshToken: oauth["refreshToken"] as? String
+    )
 }
 
 // MARK: - API
@@ -57,47 +40,25 @@ enum ClaudeError: Error {
     case parseFailure
 }
 
-func getOrgId(token: String) async throws -> String {
-    var req = URLRequest(url: URL(string: "https://claude.ai/api/auth/session")!)
+private let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
+private let refreshURL = URL(string: "https://claude.ai/api/auth/oauth/refresh")!
+
+func getUsage(token: String) async throws -> UsageData {
+    var req = URLRequest(url: usageURL)
     req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
 
     let (data, response) = try await URLSession.shared.data(for: req)
     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
-    if statusCode == 401 { throw ClaudeError.unauthorized }
+    if statusCode == 401 || statusCode == 403 { throw ClaudeError.unauthorized }
     guard statusCode == 200 else { throw ClaudeError.badStatus(statusCode) }
 
-    guard
-        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let memberships = json["memberships"] as? [[String: Any]],
-        let org = memberships.first?["organization"] as? [String: Any],
-        let orgId = org["id"] as? String
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     else { throw ClaudeError.parseFailure }
 
-    return orgId
-}
-
-struct UsageData {
-    let sessionPercent: Int
-    let weeklyPercent: Int
-}
-
-func getUsage(token: String, orgId: String) async throws -> UsageData {
-    var req = URLRequest(
-        url: URL(string: "https://claude.ai/api/organizations/\(orgId)/usage")!)
-    req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-    let (data, response) = try await URLSession.shared.data(for: req)
-    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
-
-    if statusCode == 401 { throw ClaudeError.unauthorized }
-    guard statusCode == 200 else { throw ClaudeError.badStatus(statusCode) }
-
-    guard
-        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let sessionPct = json["primary_usage_percent"] as? Double,
-        let weeklyPct = json["weekly_usage_percent"] as? Double
-    else { throw ClaudeError.parseFailure }
+    let sessionPct = (json["five_hour"] as? [String: Any])?["utilization"] as? Double ?? 0
+    let weeklyPct = (json["seven_day"] as? [String: Any])?["utilization"] as? Double ?? 0
 
     return UsageData(
         sessionPercent: Int(sessionPct.rounded()),
@@ -105,8 +66,13 @@ func getUsage(token: String, orgId: String) async throws -> UsageData {
     )
 }
 
+struct UsageData {
+    let sessionPercent: Int
+    let weeklyPercent: Int
+}
+
 func doRefreshToken(_ refreshToken: String) async throws -> String {
-    var req = URLRequest(url: URL(string: "https://claude.ai/api/auth/oauth/refresh")!)
+    var req = URLRequest(url: refreshURL)
     req.httpMethod = "POST"
     req.setValue("application/json", forHTTPHeaderField: "Content-Type")
     req.httpBody = try? JSONSerialization.data(withJSONObject: ["refresh_token": refreshToken])
@@ -116,9 +82,8 @@ func doRefreshToken(_ refreshToken: String) async throws -> String {
         throw ClaudeError.unauthorized
     }
 
-    guard
-        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-        let newToken = json["access_token"] as? String
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let newToken = json["access_token"] as? String
     else { throw ClaudeError.unauthorized }
 
     return newToken
@@ -129,12 +94,14 @@ func doRefreshToken(_ refreshToken: String) async throws -> String {
 class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private var timer: Timer?
-    private var cachedOrgId: String?
+    private var cachedCreds: KeychainCredentials?
     private var lastDisplay: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         setDisplay("S:--% W:--%")
+
+        cachedCreds = readKeychainCredentials()
 
         Task { await poll() }
 
@@ -150,7 +117,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func poll() async {
-        guard let creds = readKeychainCredentials() else {
+        guard let creds = cachedCreds else {
             setDisplay("Claude: no auth")
             return
         }
@@ -161,6 +128,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             lastDisplay = text
             setDisplay(text)
         } catch ClaudeError.unauthorized {
+            cachedCreds = readKeychainCredentials()
             setDisplay("Claude: no auth")
         } catch let urlErr as URLError
             where urlErr.code == .notConnectedToInternet
@@ -178,23 +146,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func fetchUsage(creds: KeychainCredentials) async throws -> UsageData {
         do {
-            return try await fetchUsageWithToken(creds.accessToken)
+            return try await getUsage(token: creds.accessToken)
         } catch ClaudeError.unauthorized {
             guard let rt = creds.refreshToken else { throw ClaudeError.unauthorized }
             let newToken = try await doRefreshToken(rt)
-            return try await fetchUsageWithToken(newToken)
-        }
-    }
-
-    private func fetchUsageWithToken(_ token: String) async throws -> UsageData {
-        if cachedOrgId == nil {
-            cachedOrgId = try await getOrgId(token: token)
-        }
-        do {
-            return try await getUsage(token: token, orgId: cachedOrgId!)
-        } catch {
-            cachedOrgId = nil
-            throw error
+            cachedCreds = KeychainCredentials(accessToken: newToken, refreshToken: rt)
+            return try await getUsage(token: newToken)
         }
     }
 }
