@@ -1,4 +1,4 @@
-# ClaudeQuotaBar
+# CC-Menu
 
 A minimal macOS menu bar app that shows Claude AI quota usage as plain text.
 
@@ -94,7 +94,7 @@ S:42% W:71%
 
 ```bash
 swift build
-.build/debug/ClaudeQuotaBar
+.build/debug/cc-menu
 ```
 
 ## Distribution (Homebrew)
