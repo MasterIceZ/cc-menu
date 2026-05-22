@@ -12,7 +12,7 @@ struct KeychainCredentials {
 func readKeychainCredentials() -> KeychainCredentials? {
     let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "Claude Code",
+        kSecAttrService as String: "Claude Code-credentials",
         kSecReturnData as String: true,
         kSecMatchLimit as String: kSecMatchLimitAll,
     ]
@@ -31,19 +31,18 @@ func readKeychainCredentials() -> KeychainCredentials? {
     }
 
     for data in dataItems {
-        // Try JSON blob {"access_token": "...", "refresh_token": "..."}
-        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let accessToken = json["access_token"] as? String
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            continue
+        }
+
+        // Claude Code stores credentials under "claudeAiOauth"
+        if let oauth = json["claudeAiOauth"] as? [String: Any],
+           let accessToken = oauth["accessToken"] as? String
         {
             return KeychainCredentials(
                 accessToken: accessToken,
-                refreshToken: json["refresh_token"] as? String
+                refreshToken: oauth["refreshToken"] as? String
             )
-        }
-
-        // Try plain JWT string
-        if let token = String(data: data, encoding: .utf8), token.hasPrefix("ey") {
-            return KeychainCredentials(accessToken: token, refreshToken: nil)
         }
     }
 
