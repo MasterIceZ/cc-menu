@@ -145,6 +145,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(sessionResetItem)
         menu.addItem(weeklyResetItem)
         menu.addItem(.separator())
+        let newChat = NSMenuItem(title: "New Chat", action: #selector(openNewChat), keyEquivalent: "n")
+        newChat.target = self
+        menu.addItem(newChat)
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
@@ -155,6 +159,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { await self?.poll() }
         }
+    }
+
+    @objc private func openNewChat() {
+        NSWorkspace.shared.open(URL(string: "https://claude.ai/new")!)
     }
 
     private func setDisplay(_ text: String) {
