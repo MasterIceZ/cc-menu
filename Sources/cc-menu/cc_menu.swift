@@ -136,7 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        setDisplay("✺ S:--% W:--%")
+        setDisplay("✺ --% --%")
 
         sessionResetItem.isEnabled = false
         weeklyResetItem.isEnabled  = false
@@ -187,7 +187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let usage = try await fetchUsage(creds: creds)
-            let text = "✺ S:\(usage.sessionPercent)% W:\(usage.weeklyPercent)%"
+            let text = "✺ \(usage.sessionPercent)% \(usage.weeklyPercent)%"
             lastDisplay = text
             setDisplay(text)
             updateMenuResets(session: usage.sessionResetsAt, weekly: usage.weeklyResetsAt)
@@ -201,10 +201,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                || urlErr.code == .cannotConnectToHost
                || urlErr.code == .timedOut
         {
-            setDisplay("⚠ S:--% W:--%")
+            setDisplay("⚠ --% --%")
         } catch {
             fputs("cc-menu: \(error)\n", stderr)
-            setDisplay(lastDisplay ?? "✺ S:--% W:--%")
+            setDisplay(lastDisplay ?? "✺ --% --%")
         }
     }
 
