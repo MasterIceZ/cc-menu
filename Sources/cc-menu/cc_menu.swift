@@ -136,7 +136,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        setDisplay("✺ --% --%")
+        setDisplay("✽ --% --%")
 
         sessionResetItem.isEnabled = false
         weeklyResetItem.isEnabled  = false
@@ -195,7 +195,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         do {
             let usage = try await fetchUsage(creds: creds)
-            let text = "✺ \(usage.sessionPercent)% \(usage.weeklyPercent)%"
+            let text = "✽ \(usage.sessionPercent)% \(usage.weeklyPercent)%"
             lastDisplay = text
             setDisplay(text)
             updateMenuResets(session: usage.sessionResetsAt, weekly: usage.weeklyResetsAt)
@@ -212,7 +212,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             setDisplay("⚠ --% --%")
         } catch {
             fputs("cc-menu: \(error)\n", stderr)
-            setDisplay(lastDisplay ?? "✺ --% --%")
+            setDisplay(lastDisplay ?? "✽ --% --%")
         }
     }
 
