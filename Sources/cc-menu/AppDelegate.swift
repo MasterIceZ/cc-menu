@@ -20,6 +20,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(sessionResetItem)
         menu.addItem(weeklyResetItem)
         menu.addItem(.separator())
+        let reconnect = NSMenuItem(title: "Reconnect", action: #selector(reconnect), keyEquivalent: "r")
+        reconnect.target = self
+        menu.addItem(reconnect)
         let newChat = NSMenuItem(title: "New Chat", action: #selector(openNewChat), keyEquivalent: "n")
         newChat.target = self
         menu.addItem(newChat)
@@ -34,6 +37,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { await self?.poll() }
         }
+
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { await self?.poll() }
+        }
+    }
+
+    @objc private func reconnect() {
+        cachedCreds = readKeychainCredentials()
+        Task { await poll() }
     }
 
     @objc private func openNewChat() {
@@ -57,6 +73,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func poll() async {
+        if cachedCreds == nil {
+            cachedCreds = readKeychainCredentials()
+        }
         guard let creds = cachedCreds else {
             setDisplay("Claude: no auth")
             return
