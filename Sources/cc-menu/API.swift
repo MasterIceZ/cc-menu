@@ -2,6 +2,7 @@ import Foundation
 
 enum ClaudeError: Error {
     case unauthorized
+    case rateLimited
     case badStatus(Int)
     case parseFailure
 }
@@ -31,6 +32,7 @@ func getUsage(token: String) async throws -> UsageData {
     let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
 
     if statusCode == 401 || statusCode == 403 { throw ClaudeError.unauthorized }
+    if statusCode == 429 { throw ClaudeError.rateLimited }
     guard statusCode == 200 else { throw ClaudeError.badStatus(statusCode) }
 
     guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]

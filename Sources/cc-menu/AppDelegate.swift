@@ -90,6 +90,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch ClaudeError.unauthorized {
             cachedCreds = readKeychainCredentials()
             setDisplay("Claude: no auth")
+        } catch ClaudeError.rateLimited {
+            // Keep last known values and retry on next tick
         } catch let urlErr as URLError
             where urlErr.code == .notConnectedToInternet
                || urlErr.code == .networkConnectionLost
