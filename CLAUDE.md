@@ -23,13 +23,19 @@ Display two values in the macOS menu bar, updated every 60 seconds:
 
 ## Architecture
 
-Single file: `Sources/cc-menu/cc_menu.swift`
+Files:
+- `cc_menu.swift` — `@main` entry point
+- `AppDelegate.swift` — NSApplicationDelegate, menu, polling loop, wake handler
+- `API.swift` — `getUsage()`, `doRefreshToken()`, `UsageData`, `ClaudeError`
+- `Keychain.swift` — `readKeychainCredentials()`, `KeychainCredentials`
+- `Formatters.swift` — `formatRelative()`, `absoluteFormatter`
 
 1. **NSStatusItem** — shows text in the menu bar
 2. **Keychain reader** — reads Claude Code's stored OAuth access token
 3. **API poller** — calls the Anthropic OAuth usage endpoint
 4. **Timer** — refreshes every 60 seconds
-5. **NSMenu** — shown on click with reset times, New Chat link, and Quit
+5. **NSMenu** — shown on click with reset times, Reconnect, New Chat, and Quit
+6. **Wake handler** — listens for `NSWorkspace.didWakeNotification` to poll immediately after sleep
 
 ## Keychain
 
@@ -77,16 +83,21 @@ POST https://claude.ai/api/auth/oauth/refresh
 Session resets in 2h 15m
 Weekly resets May 24, 2026 at 10:00 AM
 ———————————————————
+Reconnect                   ⌘R
 New Chat                    ⌘N
 ———————————————————
 Quit                        ⌘Q
 ```
+
+Reconnect re-reads the keychain and triggers an immediate poll — useful after waking from sleep.
 
 ## Error handling
 
 - Network error (no internet): show `⚠ --% --%`
 - Other errors: keep last known values, log to stderr
 - 401/403: refresh token once, then show `Claude: no auth`
+- If `cachedCreds` is nil at poll time, re-read keychain before giving up (handles post-sleep recovery)
+- On wake from sleep: `NSWorkspace.didWakeNotification` triggers an immediate poll
 
 ## Build & run
 
